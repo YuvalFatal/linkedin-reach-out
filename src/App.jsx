@@ -4,6 +4,13 @@ import './App.css'
 const STORAGE_KEY = 'reachout-saved-templates'
 const COOKIE_STORAGE_KEY = 'reachout-linkedin-cookie'
 
+const DEFAULT_DATA_INCLUSION = {
+  about: true,
+  experience: true,
+  skills: true,
+  education: true
+}
+
 const SAMPLE_TEMPLATES = [
   {
     name: "Networking",
@@ -13,7 +20,9 @@ I came across your profile and was impressed by your work at {company}. I'd love
 
 Would you be open to a brief chat sometime?
 
-Best regards`
+Best regards`,
+    systemPrompt: '',
+    dataInclusion: { ...DEFAULT_DATA_INCLUSION }
   },
   {
     name: "Job Opportunity",
@@ -23,7 +32,9 @@ I noticed your experience in {field} and thought you might be interested in an e
 
 We're looking for someone with your background, and I'd love to share more details if you're open to it.
 
-Let me know if you'd like to connect!`
+Let me know if you'd like to connect!`,
+    systemPrompt: '',
+    dataInclusion: { ...DEFAULT_DATA_INCLUSION }
   },
   {
     name: "Collaboration",
@@ -33,13 +44,17 @@ I've been following your work and find it really inspiring. I'm working on a pro
 
 Would you be interested in exploring a potential collaboration?
 
-Looking forward to hearing from you!`
+Looking forward to hearing from you!`,
+    systemPrompt: '',
+    dataInclusion: { ...DEFAULT_DATA_INCLUSION }
   }
 ];
 
 function App() {
   const [profileUrl, setProfileUrl] = useState('')
   const [messageTemplate, setMessageTemplate] = useState('')
+  const [systemPrompt, setSystemPrompt] = useState('')
+  const [dataInclusion, setDataInclusion] = useState({ ...DEFAULT_DATA_INCLUSION })
   const [manualProfile, setManualProfile] = useState({
     name: '',
     headline: '',
@@ -50,6 +65,7 @@ function App() {
   const [showManualInput, setShowManualInput] = useState(false)
   const [generatedMessage, setGeneratedMessage] = useState('')
   const [profileData, setProfileData] = useState(null)
+  const [scrapedProfileData, setScrapedProfileData] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [copied, setCopied] = useState(false)
@@ -61,6 +77,8 @@ function App() {
   const [nameError, setNameError] = useState('')
   const [linkedinCookie, setLinkedinCookie] = useState('')
   const [showSettings, setShowSettings] = useState(false)
+  const [showSystemPrompt, setShowSystemPrompt] = useState(false)
+  const [showProfileDetails, setShowProfileDetails] = useState(false)
 
   // Load saved templates and LinkedIn cookie from localStorage on mount
   useEffect(() => {
@@ -92,6 +110,8 @@ function App() {
   const handleGenerate = async () => {
     setError('')
     setGeneratedMessage('')
+    setScrapedProfileData(null)
+    setShowProfileDetails(false)
     setLoading(true)
 
     try {
@@ -101,6 +121,8 @@ function App() {
         body: JSON.stringify({
           profileUrl,
           messageTemplate,
+          systemPrompt: systemPrompt.trim() || undefined,
+          dataInclusion,
           manualProfileData: showManualInput ? manualProfile : null,
           linkedinCookie: linkedinCookie.trim() || undefined
         })
@@ -121,8 +143,12 @@ function App() {
         return
       }
 
+      console.log('[Frontend] Full profile data received:', data.fullProfileData)
+      console.log('[Frontend] Profile data received:', data.profileData)
       setGeneratedMessage(data.personalizedMessage)
       setProfileData(data.profileData)
+      setScrapedProfileData(data.fullProfileData || data.profileData)
+      setShowProfileDetails(true) // Auto-expand profile details
     } catch (err) {
       setError('Network error. Make sure the server is running.')
     } finally {
@@ -136,8 +162,18 @@ function App() {
     setTimeout(() => setCopied(false), 2000)
   }
 
-  const selectTemplate = (template, id = null) => {
-    setMessageTemplate(template)
+  const selectTemplate = (templateObj, id = null) => {
+    if (typeof templateObj === 'string') {
+      // Legacy: just template text
+      setMessageTemplate(templateObj)
+      setSystemPrompt('')
+      setDataInclusion({ ...DEFAULT_DATA_INCLUSION })
+    } else {
+      // New: full template object
+      setMessageTemplate(templateObj.template || '')
+      setSystemPrompt(templateObj.systemPrompt || '')
+      setDataInclusion(templateObj.dataInclusion || { ...DEFAULT_DATA_INCLUSION })
+    }
     setSelectedTemplateId(id)
   }
 
@@ -157,7 +193,9 @@ function App() {
     const newTemplate = {
       id: Date.now(),
       name: trimmedName,
-      template: messageTemplate
+      template: messageTemplate,
+      systemPrompt: systemPrompt,
+      dataInclusion: { ...dataInclusion }
     }
     
     const updated = [...savedTemplates, newTemplate]
@@ -176,7 +214,12 @@ function App() {
     if (!selectedTemplateId || !messageTemplate.trim()) return
     
     const updated = savedTemplates.map(t => 
-      t.id === selectedTemplateId ? { ...t, template: messageTemplate } : t
+      t.id === selectedTemplateId ? { 
+        ...t, 
+        template: messageTemplate,
+        systemPrompt: systemPrompt,
+        dataInclusion: { ...dataInclusion }
+      } : t
     )
     setSavedTemplates(updated)
     localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
@@ -196,7 +239,11 @@ function App() {
 
   // Check if current template content differs from selected saved template
   const selectedTemplate = savedTemplates.find(t => t.id === selectedTemplateId)
-  const hasUnsavedChanges = selectedTemplate && messageTemplate !== selectedTemplate.template
+  const hasUnsavedChanges = selectedTemplate && (
+    messageTemplate !== selectedTemplate.template ||
+    systemPrompt !== (selectedTemplate.systemPrompt || '') ||
+    JSON.stringify(dataInclusion) !== JSON.stringify(selectedTemplate.dataInclusion || DEFAULT_DATA_INCLUSION)
+  )
 
   // Combine default and saved templates
   const allTemplates = [
@@ -356,7 +403,7 @@ function App() {
                       <button 
                         key={t.id} 
                         className="template-btn"
-                        onClick={() => selectTemplate(t.template)}
+                        onClick={() => selectTemplate(t)}
                       >
                         {t.name}
                       </button>
@@ -364,7 +411,7 @@ function App() {
                       <div key={t.id} className={`saved-template-item ${selectedTemplateId === t.id ? 'selected' : ''}`}>
                         <button 
                           className={`template-btn saved ${selectedTemplateId === t.id ? 'active' : ''}`}
-                          onClick={() => selectTemplate(t.template, t.id)}
+                          onClick={() => selectTemplate(t, t.id)}
                         >
                           {t.name}
                         </button>
@@ -392,6 +439,91 @@ Use placeholders like {name}, {company}, {title} or just write naturally - AI wi
                   onChange={(e) => setMessageTemplate(e.target.value)}
                   rows={8}
                 />
+
+                {/* System Prompt Toggle */}
+                <div className="advanced-options">
+                  <button 
+                    className={`toggle-advanced-btn ${showSystemPrompt ? 'expanded' : ''}`}
+                    onClick={() => setShowSystemPrompt(!showSystemPrompt)}
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polyline points="6 9 12 15 18 9"/>
+                    </svg>
+                    Advanced Options
+                  </button>
+                  
+                  {showSystemPrompt && (
+                    <div className="advanced-content">
+                      {/* System Prompt */}
+                      <div className="system-prompt-section">
+                        <label className="section-label">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+                            <line x1="12" y1="17" x2="12.01" y2="17"/>
+                          </svg>
+                          System Prompt
+                          <span className="label-hint">Give the AI extra context and instructions</span>
+                        </label>
+                        <textarea
+                          className="textarea-field system-prompt-input"
+                          placeholder="Example: You are reaching out on behalf of a tech startup. Keep messages under 100 words. Focus on mutual benefits. Always mention that you found them through a shared connection."
+                          value={systemPrompt}
+                          onChange={(e) => setSystemPrompt(e.target.value)}
+                          rows={4}
+                        />
+                      </div>
+
+                      {/* Data Inclusion Options */}
+                      <div className="data-inclusion-section">
+                        <label className="section-label">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                            <polyline points="14,2 14,8 20,8"/>
+                            <line x1="16" y1="13" x2="8" y2="13"/>
+                            <line x1="16" y1="17" x2="8" y2="17"/>
+                          </svg>
+                          Profile Data to Include
+                          <span className="label-hint">Select which scraped data to use for personalization</span>
+                        </label>
+                        <div className="data-checkboxes">
+                          <label className="checkbox-item">
+                            <input
+                              type="checkbox"
+                              checked={dataInclusion.about}
+                              onChange={(e) => setDataInclusion({...dataInclusion, about: e.target.checked})}
+                            />
+                            <span className="checkbox-label">About / Summary</span>
+                          </label>
+                          <label className="checkbox-item">
+                            <input
+                              type="checkbox"
+                              checked={dataInclusion.experience}
+                              onChange={(e) => setDataInclusion({...dataInclusion, experience: e.target.checked})}
+                            />
+                            <span className="checkbox-label">Experience</span>
+                          </label>
+                          <label className="checkbox-item">
+                            <input
+                              type="checkbox"
+                              checked={dataInclusion.skills}
+                              onChange={(e) => setDataInclusion({...dataInclusion, skills: e.target.checked})}
+                            />
+                            <span className="checkbox-label">Skills</span>
+                          </label>
+                          <label className="checkbox-item">
+                            <input
+                              type="checkbox"
+                              checked={dataInclusion.education}
+                              onChange={(e) => setDataInclusion({...dataInclusion, education: e.target.checked})}
+                            />
+                            <span className="checkbox-label">Education</span>
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
 
                 {/* Save Template Actions */}
                 <div className="template-actions">
@@ -585,6 +717,83 @@ Use placeholders like {name}, {company}, {title} or just write naturally - AI wi
                       <span className="profile-name">{profileData.name}</span>
                       <span className="profile-headline">{profileData.headline || profileData.company}</span>
                     </div>
+                  </div>
+                )}
+
+                {/* Full Scraped Profile Data */}
+                {(scrapedProfileData || profileData) && (
+                  <div className="scraped-profile-section">
+                    <button 
+                      className={`scraped-profile-toggle ${showProfileDetails ? 'expanded' : ''}`}
+                      onClick={() => setShowProfileDetails(!showProfileDetails)}
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                        <circle cx="12" cy="7" r="4"/>
+                      </svg>
+                      View Full Profile Data
+                      <svg className="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="6 9 12 15 18 9"/>
+                      </svg>
+                    </button>
+                    {showProfileDetails && (
+                      <div className="scraped-profile-details expanded">
+                        {(() => {
+                          const data = scrapedProfileData || profileData || {};
+                          const displayValue = (val) => val || <span className="not-available">Not available</span>;
+                          return (
+                            <>
+                              {data.profileUrl && (
+                                <div className="profile-field full-width">
+                                  <span className="field-label">Profile URL</span>
+                                  <span className="field-value">
+                                    <a href={data.profileUrl} target="_blank" rel="noopener noreferrer" className="profile-link">
+                                      {data.profileUrl}
+                                    </a>
+                                  </span>
+                                </div>
+                              )}
+                              <div className="profile-field">
+                                <span className="field-label">Name</span>
+                                <span className="field-value">{displayValue(data.name)}</span>
+                              </div>
+                              <div className="profile-field">
+                                <span className="field-label">Title</span>
+                                <span className="field-value">{displayValue(data.title)}</span>
+                              </div>
+                              <div className="profile-field full-width">
+                                <span className="field-label">Headline</span>
+                                <span className="field-value">{displayValue(data.headline)}</span>
+                              </div>
+                              <div className="profile-field">
+                                <span className="field-label">Company</span>
+                                <span className="field-value">{displayValue(data.company)}</span>
+                              </div>
+                              <div className="profile-field">
+                                <span className="field-label">Location</span>
+                                <span className="field-value">{displayValue(data.location)}</span>
+                              </div>
+                              <div className="profile-field full-width">
+                                <span className="field-label">About</span>
+                                <span className="field-value">{displayValue(data.about)}</span>
+                              </div>
+                              <div className="profile-field full-width">
+                                <span className="field-label">Experience</span>
+                                <span className="field-value">{displayValue(data.experience)}</span>
+                              </div>
+                              <div className="profile-field full-width">
+                                <span className="field-label">Skills</span>
+                                <span className="field-value">{displayValue(data.skills)}</span>
+                              </div>
+                              <div className="profile-field full-width">
+                                <span className="field-label">Education</span>
+                                <span className="field-value">{displayValue(data.education)}</span>
+                              </div>
+                            </>
+                          );
+                        })()}
+                      </div>
+                    )}
                   </div>
                 )}
 

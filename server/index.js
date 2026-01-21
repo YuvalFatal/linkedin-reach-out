@@ -24,7 +24,14 @@ app.get('/api/health', (req, res) => {
 // Generate personalized message endpoint
 app.post('/api/generate-message', async (req, res) => {
   try {
-    const { profileUrl, messageTemplate, manualProfileData, linkedinCookie } = req.body;
+    const { 
+      profileUrl, 
+      messageTemplate, 
+      systemPrompt, 
+      dataInclusion = { about: true, experience: true, skills: true, education: true },
+      manualProfileData, 
+      linkedinCookie 
+    } = req.body;
 
     if (!profileUrl && !manualProfileData) {
       return res.status(400).json({ 
@@ -72,22 +79,46 @@ app.post('/api/generate-message', async (req, res) => {
       }
     }
 
+    // Store full profile data before filtering
+    const fullProfileData = { ...profileData };
+
+    // Build profile info string based on data inclusion settings
+    const profileInfoParts = [
+      `- Name: ${profileData.name || 'Unknown'}`,
+      `- Current Title: ${profileData.title || 'Not provided'}`,
+      `- Headline: ${profileData.headline || 'Not provided'}`,
+      `- Company: ${profileData.company || 'Not provided'}`,
+      `- Location: ${profileData.location || 'Not provided'}`
+    ];
+
+    if (dataInclusion.about) {
+      profileInfoParts.push(`- About/Summary: ${profileData.about || 'Not provided'}`);
+    }
+    if (dataInclusion.experience) {
+      profileInfoParts.push(`- Experience: ${profileData.experience || 'Not provided'}`);
+    }
+    if (dataInclusion.skills) {
+      profileInfoParts.push(`- Skills: ${profileData.skills || 'Not provided'}`);
+    }
+    if (dataInclusion.education) {
+      profileInfoParts.push(`- Education: ${profileData.education || 'Not provided'}`);
+    }
+
+    const profileInfoString = profileInfoParts.join('\n');
+
+    // Build the system context
+    const baseSystemPrompt = `You are an expert at writing personalized LinkedIn outreach messages. 
+Your task is to take a message template and personalize it for a specific person based on their LinkedIn profile information.`;
+
+    const customContext = systemPrompt ? `\n\n**Additional Context & Instructions from User:**\n${systemPrompt}` : '';
+
     // Generate personalized message using Google AI
     const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
 
-    const prompt = `You are an expert at writing personalized LinkedIn outreach messages. 
-Your task is to take a message template and personalize it for a specific person based on their LinkedIn profile information.
+    const prompt = `${baseSystemPrompt}${customContext}
 
 **Profile Information:**
-- Name: ${profileData.name || 'Unknown'}
-- Current Title: ${profileData.title || 'Not provided'}
-- Headline: ${profileData.headline || 'Not provided'}
-- Company: ${profileData.company || 'Not provided'}
-- Location: ${profileData.location || 'Not provided'}
-- About/Summary: ${profileData.about || 'Not provided'}
-- Experience: ${profileData.experience || 'Not provided'}
-- Skills: ${profileData.skills || 'Not provided'}
-- Education: ${profileData.education || 'Not provided'}
+${profileInfoString}
 
 **Original Message Template:**
 ${messageTemplate}
@@ -107,6 +138,9 @@ ${messageTemplate}
     const result = await model.generateContent(prompt);
     const personalizedMessage = result.response.text();
 
+    // Log the full profile data for debugging
+    console.log('[API] Full profile data being returned:', JSON.stringify(fullProfileData, null, 2));
+
     res.json({
       success: true,
       originalTemplate: messageTemplate,
@@ -115,8 +149,14 @@ ${messageTemplate}
         title: profileData.title,
         headline: profileData.headline,
         company: profileData.company,
-        location: profileData.location
+        location: profileData.location,
+        about: profileData.about,
+        experience: profileData.experience,
+        skills: profileData.skills,
+        education: profileData.education,
+        profileUrl: profileData.profileUrl
       },
+      fullProfileData: fullProfileData,
       personalizedMessage: personalizedMessage.trim()
     });
 

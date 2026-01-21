@@ -8,6 +8,9 @@ Generate personalized LinkedIn outreach messages using Google's Gemini AI. Trans
 - **AI-Based Profile Extraction** - Uses Gemini to intelligently extract profile data from LinkedIn pages (robust against HTML changes)
 - **LinkedIn Profile Scraping** - Puppeteer with authenticated session cookie for reliable access
 - **Template Support** - Start with pre-built templates or create and save your own
+- **System Prompts** - Add custom instructions and context to guide AI message generation per template
+- **Data Inclusion Control** - Select which profile data (about, experience, skills, education) to include per template
+- **Profile Data Viewer** - View all scraped profile information after generation
 - **Manual Input Fallback** - Enter profile details manually when needed
 - **Modern UI** - Beautiful dark-themed interface with smooth animations
 
@@ -65,8 +68,12 @@ The app will be available at [http://localhost:5173](http://localhost:5173)
 1. **Configure LinkedIn Cookie** - Click Settings and paste your `li_at` cookie (or set it in `.env`)
 2. **Enter LinkedIn URL** - Paste the LinkedIn profile URL of your prospect
 3. **Write or Select Template** - Use a pre-built template or write your own message
-4. **Generate** - Click the generate button to create a personalized message
-5. **Copy & Send** - Copy the generated message and send it on LinkedIn
+4. **Configure Advanced Options** (optional):
+   - **System Prompt** - Add custom instructions for the AI (e.g., "Keep messages under 100 words", "Mention mutual connections")
+   - **Data Inclusion** - Toggle which profile data to use (About, Experience, Skills, Education)
+5. **Generate** - Click the generate button to create a personalized message
+6. **Review Profile Data** - View the scraped profile information in the expandable section
+7. **Copy & Send** - Copy the generated message and send it on LinkedIn
 
 ### Template Placeholders
 
@@ -77,6 +84,15 @@ You can use placeholders in your templates that will be replaced with actual val
 - `{location}` - Location
 
 Or simply write naturally - the AI will personalize based on the context.
+
+### System Prompts
+
+System prompts give the AI additional context and instructions. Examples:
+- "You are reaching out on behalf of a tech startup. Keep messages brief and professional."
+- "Focus on mutual benefits and always mention shared industry experience."
+- "Write in a casual, friendly tone. Keep it under 50 words."
+
+System prompts are saved per template, so different outreach types can have different AI instructions.
 
 ## Environment Variables
 
