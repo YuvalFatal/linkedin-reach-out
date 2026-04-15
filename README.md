@@ -6,7 +6,7 @@ Generate personalized LinkedIn outreach messages using Google's Gemini AI. Trans
 
 - **AI-Powered Personalization** - Uses Google Gemini AI to craft personalized messages
 - **AI-Based Profile Extraction** - Uses Gemini to intelligently extract profile data from LinkedIn pages (robust against HTML changes)
-- **LinkedIn Profile Scraping** - Puppeteer with authenticated session cookie for reliable access
+- **LinkedIn Profile Scraping** - Direct HTTP requests with authenticated session cookie for reliable, lightweight access
 - **Template Support** - Start with pre-built templates or create and save your own
 - **System Prompts** - Add custom instructions and context to guide AI message generation per template
 - **Data Inclusion Control** - Select which profile data (about, experience, skills, education) to include per template
@@ -103,13 +103,13 @@ System prompts are saved per template, so different outreach types can have diff
 | `PORT` | Server port (default: 3001) | No |
 | `GEMINI_MODEL_SCRAPING` | Gemini model for profile extraction (default: `gemini-2.0-flash`) | No |
 | `GEMINI_MODEL_MESSAGING` | Gemini model for message generation (default: `gemini-3-pro-preview`) | No |
-| `DEBUG_MODE` | Set to `true` to show browser window during scraping | No |
+| `DEBUG_MODE` | Set to `true` to enable verbose logging of scraped HTML and extracted data | No |
 
 ## Tech Stack
 
 - **Frontend**: React 18 + Vite
 - **Backend**: Express.js
-- **Scraping**: Puppeteer (headless Chrome) + Gemini AI for data extraction
+- **Scraping**: Direct HTTP + Gemini AI for data extraction
 - **AI**: Google Gemini for both profile extraction and message personalization
 - **Styling**: Custom CSS with CSS Variables
 
@@ -119,7 +119,7 @@ System prompts are saved per template, so different outreach types can have diff
 linkedin-reach-out/
 ├── server/
 │   ├── index.js              # Express server
-│   └── linkedin-scraper.js   # Puppeteer-based LinkedIn scraper
+│   └── linkedin-scraper.js   # HTTP-based LinkedIn scraper
 ├── src/
 │   ├── main.jsx              # React entry point
 │   ├── App.jsx               # Main React component
@@ -135,17 +135,15 @@ linkedin-reach-out/
 
 ## Debugging
 
-To debug the LinkedIn scraper with a visible browser window, add to your `.env` file:
+To enable verbose logging for the LinkedIn scraper, add to your `.env` file:
 
 ```env
 DEBUG_MODE=true
 ```
 
 This will:
-- Show the Chrome browser window during scraping
-- Save a screenshot as `debug-screenshot.png`
-- Print detailed logs including page content and AI extraction steps
-- Keep browser open for 30 seconds on error for inspection
+- Log the raw HTML response from LinkedIn
+- Print detailed AI extraction steps and responses
 
 ## Troubleshooting
 
@@ -158,7 +156,7 @@ Your `li_at` cookie has expired. Get a fresh cookie from LinkedIn (see step 2 ab
 - LinkedIn's HTML structure may have changed - check the console logs for debugging
 
 ### Scraping not working
-- Enable `DEBUG_MODE` to see what's happening in the browser
+- Enable `DEBUG_MODE` to see the raw HTML response and extraction details
 - Check the server console for detailed profile data logs
 - Try with a different LinkedIn profile
 
