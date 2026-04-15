@@ -1,14 +1,14 @@
-import puppeteer from 'puppeteer';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 /**
- * Scrapes LinkedIn profile data using Puppeteer with authenticated session cookies
- * Uses AI to extract structured data from the page content
+ * Scrapes LinkedIn profile data using LinkedIn's Voyager API with authenticated session cookies.
+ * Uses direct HTTP requests instead of a browser to avoid triggering LinkedIn's
+ * new-device detection (which invalidates the session).
+ * Uses AI to extract structured data from the API response.
  */
 export async function scrapeLinkedInProfile(profileUrl, linkedinCookie) {
-  // Read DEBUG_MODE at runtime (after dotenv has loaded)
   const DEBUG_MODE = process.env.DEBUG_MODE === 'true';
-  
+
   // Validate LinkedIn URL
   if (!profileUrl || !profileUrl.includes('linkedin.com/in/')) {
     throw new Error('Invalid LinkedIn profile URL. URL should be like: https://www.linkedin.com/in/username');
@@ -18,104 +18,122 @@ export async function scrapeLinkedInProfile(profileUrl, linkedinCookie) {
     throw new Error('LinkedIn session cookie (li_at) is required for scraping');
   }
 
-  // Clean the URL
+  // Extract username from URL
   const cleanUrl = profileUrl.split('?')[0].replace(/\/$/, '');
+  const username = cleanUrl.split('/in/')[1];
+
+  if (!username) {
+    throw new Error('Could not extract username from LinkedIn URL');
+  }
 
   console.log(`[Scraper] DEBUG_MODE: ${DEBUG_MODE}`);
   console.log(`[Scraper] Target URL: ${cleanUrl}`);
+  console.log(`[Scraper] Username: ${username}`);
 
-  let browser;
   try {
-    // Launch Puppeteer - show browser window when DEBUG_MODE is true
-    browser = await puppeteer.launch({
-      headless: !DEBUG_MODE,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--disable-gpu',
-        '--window-size=1920,1080',
-      ],
-      slowMo: DEBUG_MODE ? 50 : 0,
+    // Step 1: Get CSRF token by fetching LinkedIn with the session cookie
+    console.log('[Scraper] Fetching CSRF token...');
+    const csrfResponse = await fetch('https://www.linkedin.com/', {
+      method: 'GET',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Cookie': `li_at=${linkedinCookie}`,
+      },
+      redirect: 'manual',
     });
 
-    const page = await browser.newPage();
+    // Check if session is valid (LinkedIn redirects to login if invalid)
+    if (csrfResponse.status === 302 || csrfResponse.status === 301) {
+      const location = csrfResponse.headers.get('location') || '';
+      if (location.includes('/login') || location.includes('/authwall')) {
+        throw new Error('LinkedIn session expired or invalid. Please update your li_at cookie.');
+      }
+    }
 
-    // Set viewport to desktop size
-    await page.setViewport({ width: 1920, height: 1080 });
+    // Extract JSESSIONID from set-cookie headers for CSRF token
+    const setCookies = csrfResponse.headers.getSetCookie?.() || [];
+    let jsessionId = '';
+    for (const cookie of setCookies) {
+      const match = cookie.match(/JSESSIONID="?([^";]+)"?/);
+      if (match) {
+        jsessionId = match[1];
+        break;
+      }
+    }
 
-    // Set a realistic user agent
-    await page.setUserAgent(
-      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    );
+    // Also try to extract from response cookies string
+    if (!jsessionId) {
+      const cookieHeader = csrfResponse.headers.get('set-cookie') || '';
+      const match = cookieHeader.match(/JSESSIONID="?([^";]+)"?/);
+      if (match) {
+        jsessionId = match[1];
+      }
+    }
 
-    // Set the LinkedIn session cookie
-    await page.setCookie({
-      name: 'li_at',
-      value: linkedinCookie,
-      domain: '.linkedin.com',
-      path: '/',
-      httpOnly: true,
-      secure: true,
-      sameSite: 'None',
+    if (!jsessionId) {
+      // Generate a CSRF token format that LinkedIn accepts
+      jsessionId = `ajax:${Date.now()}`;
+      console.log('[Scraper] Could not extract JSESSIONID, using generated token');
+    }
+
+    const csrfToken = jsessionId.replace(/"/g, '');
+    console.log(`[Scraper] CSRF token: ${csrfToken.substring(0, 15)}...`);
+
+    // Step 2: Fetch profile page HTML and extract data
+    console.log('[Scraper] Fetching profile page...');
+    const profileResponse = await fetch(cleanUrl, {
+      method: 'GET',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Cookie': `li_at=${linkedinCookie}; JSESSIONID="${csrfToken}"`,
+        'csrf-token': csrfToken,
+      },
     });
 
-    // Navigate to the profile page
-    console.log(`[Scraper] Navigating to profile...`);
-    console.log('[Scraper] Starting navigation...');
-    await page.goto(cleanUrl, {
-      waitUntil: 'domcontentloaded',
-      timeout: 30000,
-    });
-    console.log('[Scraper] Page navigated (domcontentloaded)');
+    if (!profileResponse.ok) {
+      console.error(`[Scraper] Response status: ${profileResponse.status}`);
 
-    // Simple wait for page to render
-    console.log('[Scraper] Waiting 3 seconds for page to render...');
-    await new Promise(resolve => setTimeout(resolve, 3000));
-    console.log('[Scraper] Wait complete');
+      if (profileResponse.status === 401 || profileResponse.status === 403) {
+        throw new Error('LinkedIn session expired or invalid. Please update your li_at cookie.');
+      }
+      if (profileResponse.status === 404) {
+        throw new Error('LinkedIn profile not found. Please check the URL.');
+      }
+      throw new Error(`LinkedIn returned status ${profileResponse.status}`);
+    }
 
-    // Check if we're on a login page (cookie invalid or expired)
-    const currentUrl = page.url();
-    console.log(`[Scraper] Current URL: ${currentUrl}`);
-    
-    if (currentUrl.includes('/login') || currentUrl.includes('/authwall')) {
+    const html = await profileResponse.text();
+
+    // Check if we got redirected to login
+    if (html.includes('/login') && html.includes('session_redirect') && !html.includes('profile-nav-item')) {
       throw new Error('LinkedIn session expired or invalid. Please update your li_at cookie.');
     }
 
-    // Debug: Take screenshot
     if (DEBUG_MODE) {
-      await page.screenshot({ path: 'debug-screenshot.png', fullPage: false });
-      console.log('[Scraper] Screenshot saved to debug-screenshot.png');
+      console.log(`\n========== HTML RESPONSE (${html.length} chars, first 2000) ==========`);
+      console.log(html.substring(0, 2000));
+      console.log('==========================================================\n');
     }
 
-    // Extract the entire page text content
-    console.log(`[Scraper] Extracting page content...`);
-    
-    const pageContent = await page.evaluate(() => {
-      return document.body.innerText;
-    });
+    // Step 3: Try to extract structured data from embedded JSON-LD or code elements
+    console.log('[Scraper] Extracting profile data...');
+    let profileData = extractProfileFromHTML(html, cleanUrl);
 
-    console.log(`[Scraper] Extracted ${pageContent.length} characters of content`);
-    
-    if (DEBUG_MODE) {
-      console.log('\n========== PAGE CONTENT (first 2000 chars) ==========');
-      console.log(pageContent.substring(0, 2000));
-      console.log('======================================================\n');
+    // If HTML extraction got minimal data, fall back to AI extraction
+    if (!profileData.name || profileData.name === 'Unknown') {
+      console.log('[Scraper] HTML extraction insufficient, falling back to AI extraction...');
+      // Strip HTML tags to get text content for AI
+      const textContent = html.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
+        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      const aiProfileData = await extractProfileWithAI(textContent.substring(0, 8000), cleanUrl);
+      return aiProfileData;
     }
 
-    // Use AI to extract structured profile data
-    console.log(`[Scraper] Using AI to extract profile data...`);
-    
-    const profileData = await extractProfileWithAI(pageContent, cleanUrl);
-    
-    // Validate we got at least a name
-    if (!profileData.name) {
-      console.log('[Scraper] Could not extract name from page');
-      throw new Error('Could not extract profile data. The page may not have loaded correctly.');
-    }
-
-    // Log the full profile data for debugging
     console.log('\n========== SCRAPED PROFILE DATA ==========');
     console.log(JSON.stringify(profileData, null, 2));
     console.log('==========================================\n');
@@ -124,47 +142,139 @@ export async function scrapeLinkedInProfile(profileUrl, linkedinCookie) {
 
   } catch (error) {
     console.error('[Scraper] Error:', error.message);
-    
-    // In debug mode, keep browser open for inspection
-    if (DEBUG_MODE && browser) {
-      console.log('[Scraper] DEBUG_MODE: Browser kept open for 30s for inspection...');
-      await new Promise(resolve => setTimeout(resolve, 30000));
-    }
-    
     throw error;
-  } finally {
-    if (browser) {
-      await browser.close();
-    }
   }
 }
 
 /**
- * Use Gemini AI to extract structured profile data from page content
+ * Extract structured profile data from LinkedIn HTML page.
+ * LinkedIn embeds JSON-LD structured data in the page for SEO.
+ */
+function extractProfileFromHTML(html, profileUrl) {
+  const profile = {
+    name: '',
+    title: '',
+    headline: '',
+    company: '',
+    location: '',
+    about: '',
+    experience: '',
+    skills: '',
+    education: '',
+    profileUrl: profileUrl,
+  };
+
+  try {
+    // Try to extract JSON-LD structured data (LinkedIn embeds this for SEO)
+    const jsonLdMatch = html.match(/<script[^>]*type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/i);
+    if (jsonLdMatch) {
+      const jsonLd = JSON.parse(jsonLdMatch[1]);
+      console.log('[Scraper] Found JSON-LD data');
+
+      if (jsonLd['@type'] === 'Person' || jsonLd.name) {
+        profile.name = jsonLd.name || '';
+        profile.headline = jsonLd.jobTitle || jsonLd.description || '';
+        profile.title = jsonLd.jobTitle || '';
+        profile.location = typeof jsonLd.address === 'object'
+          ? jsonLd.address.addressLocality || jsonLd.address.name || ''
+          : (jsonLd.address || '');
+
+        if (jsonLd.worksFor) {
+          const org = Array.isArray(jsonLd.worksFor) ? jsonLd.worksFor[0] : jsonLd.worksFor;
+          profile.company = org?.name || '';
+        }
+
+        if (jsonLd.alumniOf) {
+          const schools = Array.isArray(jsonLd.alumniOf) ? jsonLd.alumniOf : [jsonLd.alumniOf];
+          profile.education = schools.map(s => s.name || s).filter(Boolean).join('; ');
+        }
+      }
+    }
+
+    // Try to extract data from embedded code/initial state objects
+    const codeMatches = html.matchAll(/<code[^>]*id="bpr-guid-\d+"[^>]*><!--([\s\S]*?)--><\/code>/gi);
+    for (const match of codeMatches) {
+      try {
+        const data = JSON.parse(match[1]);
+        const included = data.included || [];
+        for (const item of included) {
+          const type = item.$type || '';
+
+          if (type.includes('Profile') && item.firstName && !profile.name) {
+            profile.name = `${item.firstName} ${item.lastName}`.trim();
+            profile.headline = item.headline || profile.headline;
+            profile.location = item.locationName || item.geoLocationName || profile.location;
+          }
+
+          if (type.includes('Profile') && item.summary && !profile.about) {
+            profile.about = item.summary;
+          }
+        }
+
+        // Positions
+        const positions = included.filter(i => (i.$type || '').includes('Position') && i.title);
+        if (positions.length > 0 && !profile.experience) {
+          const current = positions[0];
+          if (!profile.title) profile.title = current.title;
+          if (!profile.company) profile.company = current.companyName || '';
+          profile.experience = positions.slice(0, 3).map(p => {
+            const parts = [p.title];
+            if (p.companyName) parts.push(`at ${p.companyName}`);
+            return parts.join(' ');
+          }).join('; ');
+        }
+
+        // Skills
+        const skills = included.filter(i => (i.$type || '').includes('Skill') && i.name);
+        if (skills.length > 0 && !profile.skills) {
+          profile.skills = skills.map(s => s.name).slice(0, 10).join(', ');
+        }
+
+        // Education
+        const edu = included.filter(i => (i.$type || '').includes('Education') && (i.schoolName || i.school));
+        if (edu.length > 0 && !profile.education) {
+          profile.education = edu.slice(0, 3).map(e => {
+            const parts = [e.schoolName || e.school];
+            if (e.fieldOfStudy) parts.push(`- ${e.fieldOfStudy}`);
+            if (e.degreeName) parts.push(`(${e.degreeName})`);
+            return parts.join(' ');
+          }).join('; ');
+        }
+      } catch {
+        // Not valid JSON, skip
+      }
+    }
+
+  } catch (err) {
+    console.error('[Scraper] Error parsing HTML data:', err.message);
+  }
+
+  return profile;
+}
+
+/**
+ * Use Gemini AI to extract structured profile data from page content (fallback)
  */
 async function extractProfileWithAI(pageContent, profileUrl) {
   console.log('[AI] Starting AI extraction...');
-  
+
   const apiKey = process.env.GOOGLE_AI_API_KEY;
-  console.log(`[AI] API Key present: ${!!apiKey}`);
-  console.log(`[AI] API Key (first 10 chars): ${apiKey ? apiKey.substring(0, 10) + '...' : 'N/A'}`);
-  
+
   if (!apiKey) {
     throw new Error('GOOGLE_AI_API_KEY is required for AI extraction');
   }
-  
+
   const modelName = process.env.GEMINI_MODEL_SCRAPING || 'gemini-2.0-flash';
   console.log(`[AI] Using model: ${modelName}`);
-  
+
   const genAI = new GoogleGenerativeAI(apiKey);
   const model = genAI.getGenerativeModel({ model: modelName });
 
   const contentToSend = pageContent.substring(0, 8000);
-  console.log(`[AI] Content length to send: ${contentToSend.length} chars`);
 
-  const prompt = `Extract LinkedIn profile information from the following page content. Return ONLY a valid JSON object with no markdown formatting, no code blocks, just the raw JSON.
+  const prompt = `Extract LinkedIn profile information from the following API response data. Return ONLY a valid JSON object with no markdown formatting, no code blocks, just the raw JSON.
 
-PAGE CONTENT:
+DATA:
 ${contentToSend}
 
 Extract and return this exact JSON structure (use empty string "" if data not found):
@@ -182,40 +292,21 @@ Extract and return this exact JSON structure (use empty string "" if data not fo
 
 Return ONLY the JSON object, no other text.`;
 
-  console.log(`[AI] Prompt length: ${prompt.length} chars`);
-  console.log('[AI] Sending request to Gemini...');
-
   try {
     const result = await model.generateContent(prompt);
-    console.log('[AI] Got response from Gemini');
-    
     const responseText = result.response.text().trim();
-    console.log(`[AI] Response length: ${responseText.length} chars`);
-    console.log('[AI] Raw response:');
-    console.log('---START---');
-    console.log(responseText);
-    console.log('---END---');
-    
-    // Clean up the response - remove markdown code blocks if present
+
     let jsonStr = responseText;
     if (jsonStr.startsWith('```')) {
-      console.log('[AI] Removing markdown code blocks...');
       jsonStr = jsonStr.replace(/```json?\n?/g, '').replace(/```\n?$/g, '').trim();
-      console.log('[AI] Cleaned JSON:');
-      console.log(jsonStr);
     }
-    
-    console.log('[AI] Parsing JSON...');
+
     const profileData = JSON.parse(jsonStr);
-    console.log('[AI] JSON parsed successfully');
-    
     profileData.profileUrl = profileUrl;
-    
+
     return profileData;
   } catch (error) {
-    console.error('[AI] Error type:', error.constructor.name);
-    console.error('[AI] Error message:', error.message);
-    console.error('[AI] Full error:', error);
+    console.error('[AI] Error:', error.message);
     throw new Error(`Failed to extract profile with AI: ${error.message}`);
   }
 }
@@ -238,7 +329,7 @@ export function parseManualProfileData(text) {
   };
 
   const lines = text.split('\n').filter(l => l.trim());
-  
+
   if (lines.length > 0) data.name = lines[0].trim();
   if (lines.length > 1) data.headline = lines[1].trim();
   if (lines.length > 2) data.about = lines.slice(2).join('\n').trim();
