@@ -4,3 +4,5 @@ dist
 *.log
 .DS_Store
 debug-screenshot.png
+linkedin_api_response.json
+linkedin_profile_response.html
