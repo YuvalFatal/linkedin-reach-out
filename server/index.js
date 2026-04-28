@@ -3,18 +3,18 @@ dotenv.config(); // Load .env BEFORE other imports that need env vars
 
 import express from 'express';
 import cors from 'cors';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import Anthropic from '@anthropic-ai/sdk';
 import { scrapeLinkedInProfile } from './linkedin-scraper.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
-const GEMINI_MODEL = process.env.GEMINI_MODEL_MESSAGING || 'gemini-3-pro-preview';
+const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL_MESSAGING || 'claude-opus-4-7';
 
 app.use(cors());
 app.use(express.json());
 
-// Initialize Google AI
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY);
+// Initialize Anthropic (reads ANTHROPIC_API_KEY from env)
+const anthropic = new Anthropic();
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
@@ -43,9 +43,9 @@ app.post('/api/generate-message', async (req, res) => {
       return res.status(400).json({ error: 'Message template is required' });
     }
 
-    if (!process.env.GOOGLE_AI_API_KEY) {
-      return res.status(500).json({ 
-        error: 'Google AI API key not configured. Please add GOOGLE_AI_API_KEY to your .env file' 
+    if (!process.env.ANTHROPIC_API_KEY) {
+      return res.status(500).json({
+        error: 'Anthropic API key not configured. Please add ANTHROPIC_API_KEY to your .env file'
       });
     }
 
@@ -112,12 +112,7 @@ Your task is to take a message template and personalize it for a specific person
 
     const customContext = systemPrompt ? `\n\n**Additional Context & Instructions from User:**\n${systemPrompt}` : '';
 
-    // Generate personalized message using Google AI
-    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
-
-    const prompt = `${baseSystemPrompt}${customContext}
-
-**Profile Information:**
+    const userPrompt = `**Profile Information:**
 ${profileInfoString}
 
 **Original Message Template:**
@@ -135,8 +130,19 @@ ${messageTemplate}
 
 **Output only the personalized message, nothing else.**`;
 
-    const result = await model.generateContent(prompt);
-    const personalizedMessage = result.response.text();
+    const response = await anthropic.messages.create({
+      model: ANTHROPIC_MODEL,
+      max_tokens: 16000,
+      thinking: { type: 'adaptive' },
+      system: `${baseSystemPrompt}${customContext}`,
+      messages: [{ role: 'user', content: userPrompt }],
+    });
+
+    const personalizedMessage = response.content
+      .filter((block) => block.type === 'text')
+      .map((block) => block.text)
+      .join('')
+      .trim();
 
     // Log the full profile data for debugging
     console.log('[API] Full profile data being returned:', JSON.stringify(fullProfileData, null, 2));
@@ -157,7 +163,7 @@ ${messageTemplate}
         profileUrl: profileData.profileUrl
       },
       fullProfileData: fullProfileData,
-      personalizedMessage: personalizedMessage.trim()
+      personalizedMessage: personalizedMessage
     });
 
   } catch (error) {

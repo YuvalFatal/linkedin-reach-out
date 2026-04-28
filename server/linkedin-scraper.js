@@ -1,6 +1,6 @@
 import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import Anthropic from '@anthropic-ai/sdk';
 import fs from 'fs';
 
 // Stealth plugin makes Puppeteer undetectable to LinkedIn's bot detection.
@@ -127,21 +127,20 @@ export async function scrapeLinkedInProfile(profileUrl, linkedinCookie) {
 }
 
 /**
- * Use Gemini AI to extract structured profile data from page text
+ * Use Claude to extract structured profile data from page text
  */
 async function extractProfileWithAI(pageContent, profileUrl) {
   console.log('[AI] Starting AI extraction...');
 
-  const apiKey = process.env.GOOGLE_AI_API_KEY;
+  const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    throw new Error('GOOGLE_AI_API_KEY is required for AI extraction');
+    throw new Error('ANTHROPIC_API_KEY is required for AI extraction');
   }
 
-  const modelName = process.env.GEMINI_MODEL_SCRAPING || 'gemini-2.0-flash';
+  const modelName = process.env.ANTHROPIC_MODEL_SCRAPING || 'claude-haiku-4-5';
   console.log(`[AI] Using model: ${modelName}`);
 
-  const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: modelName });
+  const anthropic = new Anthropic();
 
   const contentToSend = pageContent.substring(0, 15000);
 
@@ -168,8 +167,17 @@ Extract and return this exact JSON structure (use empty string "" if data not fo
 Return ONLY the JSON object, no other text.`;
 
   try {
-    const result = await model.generateContent(prompt);
-    const responseText = result.response.text().trim();
+    const response = await anthropic.messages.create({
+      model: modelName,
+      max_tokens: 4000,
+      messages: [{ role: 'user', content: prompt }],
+    });
+
+    const responseText = response.content
+      .filter((block) => block.type === 'text')
+      .map((block) => block.text)
+      .join('')
+      .trim();
 
     let jsonStr = responseText;
     if (jsonStr.startsWith('```')) {

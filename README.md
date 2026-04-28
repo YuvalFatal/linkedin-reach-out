@@ -1,11 +1,11 @@
 # ReachOut - AI LinkedIn Message Generator
 
-Generate personalized LinkedIn outreach messages using Google's Gemini AI. Transform generic templates into compelling, tailored messages that resonate with your prospects.
+Generate personalized LinkedIn outreach messages using Anthropic's Claude. Transform generic templates into compelling, tailored messages that resonate with your prospects.
 
 ## Features
 
-- **AI-Powered Personalization** - Uses Google Gemini AI to craft personalized messages
-- **AI-Based Profile Extraction** - Uses Gemini to intelligently extract profile data from LinkedIn pages (robust against HTML changes)
+- **AI-Powered Personalization** - Uses Claude Opus 4.7 to craft personalized messages
+- **AI-Based Profile Extraction** - Uses Claude Haiku 4.5 to intelligently extract profile data from LinkedIn pages (robust against HTML changes)
 - **LinkedIn Profile Scraping** - Stealth Puppeteer browser with authenticated session cookie for reliable, undetectable access
 - **Template Support** - Start with pre-built templates or create and save your own
 - **System Prompts** - Add custom instructions and context to guide AI message generation per template
@@ -16,10 +16,10 @@ Generate personalized LinkedIn outreach messages using Google's Gemini AI. Trans
 
 ## Quick Start
 
-### 1. Get a Google AI API Key
+### 1. Get an Anthropic API Key
 
-1. Go to [Google AI Studio](https://aistudio.google.com/app/apikey)
-2. Click "Create API Key"
+1. Go to the [Anthropic Console](https://console.anthropic.com/settings/keys)
+2. Click "Create Key"
 3. Copy your API key
 
 ### 2. Get Your LinkedIn Cookie
@@ -48,7 +48,7 @@ cp .env.example .env  # or create .env manually
 Add your credentials to `.env`:
 
 ```env
-GOOGLE_AI_API_KEY=your_google_ai_api_key
+ANTHROPIC_API_KEY=your_anthropic_api_key
 LINKEDIN_COOKIE=your_li_at_cookie_value
 ```
 
@@ -98,19 +98,19 @@ System prompts are saved per template, so different outreach types can have diff
 
 | Variable | Description | Required |
 |----------|-------------|----------|
-| `GOOGLE_AI_API_KEY` | Your Google AI (Gemini) API key | Yes |
+| `ANTHROPIC_API_KEY` | Your Anthropic API key | Yes |
 | `LINKEDIN_COOKIE` | Your LinkedIn `li_at` session cookie | No (can be set in UI) |
 | `PORT` | Server port (default: 3001) | No |
-| `GEMINI_MODEL_SCRAPING` | Gemini model for profile extraction (default: `gemini-2.0-flash`) | No |
-| `GEMINI_MODEL_MESSAGING` | Gemini model for message generation (default: `gemini-3-pro-preview`) | No |
+| `ANTHROPIC_MODEL_SCRAPING` | Claude model for profile extraction (default: `claude-haiku-4-5`) | No |
+| `ANTHROPIC_MODEL_MESSAGING` | Claude model for message generation (default: `claude-opus-4-7`) | No |
 | `DEBUG_MODE` | Set to `true` to show browser window during scraping and enable verbose logging | No |
 
 ## Tech Stack
 
 - **Frontend**: React 18 + Vite
 - **Backend**: Express.js
-- **Scraping**: Puppeteer with Stealth Plugin + Gemini AI for data extraction
-- **AI**: Google Gemini for both profile extraction and message personalization
+- **Scraping**: Puppeteer with Stealth Plugin + Claude Haiku for data extraction
+- **AI**: Anthropic Claude (Opus 4.7 for messaging, Haiku 4.5 for profile extraction)
 - **Styling**: Custom CSS with CSS Variables
 
 ## Project Structure
